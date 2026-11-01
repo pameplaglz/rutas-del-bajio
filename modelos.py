@@ -1,43 +1,30 @@
 """Módulo de modelos de dominio para el sistema logístico Rutas del Bajío.
 
 Define las entidades principales (Cliente, Ruta, Pedido) junto con sus reglas
-de validación de atributos, máquina de estados y métodos de serialización CSV.
+de validación de atributos, máquina de estados unificada y métodos de serialización CSV.
 """
 
 from datetime import datetime
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Tuple
 
 
 DESTINOS_PERMITIDOS: Set[str] = {"León", "Leon", "Irapuato", "Celaya", "Salamanca", "Guanajuato"}
 
-ESTADOS_VALIDOS: Set[str] = {
-    # Catálogo Etapa 1
-    "pendiente",
-    "en_transito",
-    "entregado",
-    "cancelado",
-    # Catálogo Máquina de Estados Etapa 2
+# Catálogo único y estricto de estados operativos oficiales del pedido
+ESTADOS_VALIDOS: Tuple[str, ...] = (
     "Registrado",
     "En Validación",
     "Aprobado",
-    "Rechazado",
     "En Preparación",
     "En Ruta",
     "Entregado",
     "Cancelado",
-}
+)
 
 TRANSICIONES_PERMITIDAS: Dict[str, Set[str]] = {
-    # Etapa 1
-    "pendiente": {"en_transito", "cancelado"},
-    "en_transito": {"entregado"},
-    "entregado": set(),
-    "cancelado": set(),
-    # Etapa 2
     "Registrado": {"En Validación", "Cancelado"},
-    "En Validación": {"Aprobado", "Rechazado", "Cancelado"},
+    "En Validación": {"Aprobado", "Cancelado"},
     "Aprobado": {"En Preparación", "Cancelado"},
-    "Rechazado": set(),
     "En Preparación": {"En Ruta"},
     "En Ruta": {"Entregado"},
     "Entregado": set(),
@@ -168,7 +155,7 @@ class Ruta:
 
 
 class Pedido:
-    """Representa una orden de pedido logístico y controla su máquina de estados."""
+    """Representa una orden de pedido logístico y controla su máquina de estados oficial."""
 
     def __init__(
         self,
@@ -179,7 +166,7 @@ class Pedido:
         origen: str,
         destino: str,
         fecha_pedido: str,
-        estado: str = "pendiente",
+        estado: str = "Registrado",
         id_ruta: str = "",
     ) -> None:
         if not str(id_pedido).strip():
@@ -210,9 +197,11 @@ class Pedido:
         except ValueError as exc:
             raise ValueError("La fecha debe registrarse en formato YYYY-MM-DD.") from exc
 
-        estado_limpio = str(estado).strip() if estado else "pendiente"
+        estado_limpio = str(estado).strip() if estado else "Registrado"
         if estado_limpio not in ESTADOS_VALIDOS:
-            raise ValueError(f"Estado inválido: {estado_limpio}.")
+            raise ValueError(
+                f"Estado inválido: {estado_limpio!r}. Estados válidos: {ESTADOS_VALIDOS}."
+            )
 
         self.id_pedido: str = str(id_pedido).strip()
         self.id_cliente: str = str(id_cliente).strip()
@@ -224,12 +213,15 @@ class Pedido:
         self.estado: str = estado_limpio
         self.id_ruta: str = str(id_ruta).strip() if id_ruta is not None else ""
 
+    def puede_transicionar_a(self, nuevo_estado: str) -> bool:
+        """Indica si la transición desde el estado actual hacia nuevo_estado es válida."""
+        return nuevo_estado in TRANSICIONES_PERMITIDAS.get(self.estado, set())
+
     def transicionar_estado(self, nuevo_estado: str) -> None:
         """Ejecuta una transición en la máquina de estados validando las reglas del negocio."""
         if nuevo_estado not in ESTADOS_VALIDOS:
-            raise ValueError(f"El estado '{nuevo_estado}' no pertenece al catálogo válido.")
-        permitidos = TRANSICIONES_PERMITIDAS.get(self.estado, set())
-        if nuevo_estado not in permitidos:
+            raise ValueError(f"El estado '{nuevo_estado}' no pertenece al catálogo oficial.")
+        if not self.puede_transicionar_a(nuevo_estado):
             raise ErrorTransicionEstado(
                 f"Transición prohibida de '{self.estado}' a '{nuevo_estado}'."
             )
@@ -260,7 +252,7 @@ class Pedido:
             origen=data.get("origen") or data.get("Origen", ""),
             destino=data.get("destino") or data.get("Destino", ""),
             fecha_pedido=data["fecha_pedido"],
-            estado=data.get("estado", "pendiente"),
+            estado=data.get("estado") or "Registrado",
             id_ruta=data.get("id_ruta", ""),
         )
 
