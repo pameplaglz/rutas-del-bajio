@@ -1,7 +1,8 @@
 """Módulo de gestores CRUD, persistencia CSV y procesamiento por lotes para Rutas del Bajío.
 
-Implementa GestorClientes, GestorRutas y GestorPedidos, incluyendo validación de llaves
-foráneas, control de transiciones de estado y depuración de lotes (reglas RL-01 a RL-05).
+Implementa GestorClientes, GestorRutas y GestorPedidos con validación estricta de tipos,
+integridad de llaves foráneas, control de los 7 estados operativos oficiales y depuración
+de lotes mediante las reglas RL-01 a RL-05.
 """
 
 import csv
@@ -20,36 +21,43 @@ REGEX_CODIGO_LOTE = re.compile(r"^LT-[0-9]{5}-[A-Z]{2}$")
 class FilaLoteInvalidaError(ValueError):
     """Excepción para rechazar una fila individual durante la carga por lote."""
 
-    def __init__(self, regla: str, motivo: str, estado_destino: str = "Rechazado") -> None:
+    def __init__(self, regla: str, motivo: str, subestado_rechazo: str = "Rechazo: Descarte") -> None:
         super().__init__(f"[{regla}] {motivo}")
-        self.regla = regla
-        self.motivo = motivo
-        self.estado_destino = estado_destino
+        self.regla: str = regla
+        self.motivo: str = motivo
+        self.subestado_rechazo: str = subestado_rechazo
 
 
 @dataclass
 class RegistroRechazo:
-    """Representa un registro rechazado o puesto en cuarentena durante la carga por lote."""
+    """Representa una fila descartada durante la carga por lote con su subestado de rechazo."""
 
     linea: int
     identificador: str
     regla: str
     motivo: str
-    estado_lote: str = "Rechazado"
+    subestado_rechazo: str = "Rechazo: Descarte"
 
 
 @dataclass
 class ReporteLote:
-    """Resumen de resultados tras procesar un archivo CSV de lote."""
+    """Resumen auditable de resultados tras procesar un archivo CSV de lote."""
 
     leidas: int = 0
     aceptadas: int = 0
-    cuarentena: int = 0
     rechazadas: List[RegistroRechazo] = field(default_factory=list)
 
 
 def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") -> Dict[str, Any]:
-    """Evalúa las reglas de limpieza y depuración RL-01 a RL-05 sobre una fila de lote."""
+    """Evalúa las reglas de limpieza y depuración RL-01 a RL-05 sobre una fila de lote.
+
+    Reglas aplicadas:
+    - RL-01 (Caducidad): Rechaza si Fecha_Vencimiento <= Fecha_Actual.
+    - RL-02 (Formato de Lote): Rechaza si no cumple regex ^LT-[0-9]{5}-[A-Z]{2}$.
+    - RL-03 (Red de Frío): Rechaza si Temp < 2.0 °C o Temp > 8.0 °C (2.0 y 8.0 son válidos).
+    - RL-04 (Tolerancia de Peso): Rechaza si |Peso_Real - Peso_Teorico| / Peso_Teorico > 3% (0.03 exacto es válido).
+    - RL-05 (Certificado de Calidad): Rechaza si el certificado está PENDIENTE o AUSENTE.
+    """
     codigo_lote = str(fila.get("codigo_lote", "")).strip()
     fecha_vencimiento = str(fila.get("fecha_vencimiento", "")).strip()
     temperatura = fila.get("temperatura_c")
@@ -62,7 +70,7 @@ def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") 
         raise FilaLoteInvalidaError(
             "RL-02",
             f"Formato de código de lote inválido: {codigo_lote}",
-            estado_destino="Rechazado",
+            subestado_rechazo="Rechazo: Formato Inválido",
         )
 
     # RL-01: Caducidad Vencida (Fecha_Vencimiento <= Fecha_Actual)
@@ -73,7 +81,7 @@ def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") 
             raise FilaLoteInvalidaError(
                 "RL-01",
                 f"Lote caducado ({fecha_vencimiento} <= {fecha_actual})",
-                estado_destino="Cuarentena",
+                subestado_rechazo="Rechazo: Cuarentena",
             )
 
     # RL-03: Temperatura de Red de Frío (Temp < 2°C o Temp > 8°C)
@@ -82,8 +90,8 @@ def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") 
         if temp_val < 2.0 or temp_val > 8.0:
             raise FilaLoteInvalidaError(
                 "RL-03",
-                f"Ruptura de cadena de frío: {temp_val} °C fuera de rango [2°C - 8°C]",
-                estado_destino="Bloqueado",
+                f"Ruptura de cadena de frío: {temp_val} °C fuera del umbral [2.0 °C, 8.0 °C]",
+                subestado_rechazo="Rechazo: Red de Frío",
             )
 
     # RL-04: Inconsistencia de Peso (|Peso_Real - Peso_Teorico| / Peso_Teorico > 3%)
@@ -95,11 +103,18 @@ def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") 
     ):
         p_real = float(peso_real)
         p_teo = float(peso_teorico)
-        if p_teo > 0 and abs(p_real - p_teo) / p_teo > 0.03:
+        if p_teo <= 0:
+            raise FilaLoteInvalidaError(
+                "RL-04",
+                "El peso teórico debe ser mayor que cero.",
+                subestado_rechazo="Rechazo: Pesaje",
+            )
+        diferencia_relativa = round(abs(p_real - p_teo) / p_teo, 9)
+        if diferencia_relativa > 0.03:
             raise FilaLoteInvalidaError(
                 "RL-04",
                 f"Diferencia de pesaje superior al 3% (real={p_real}, teórico={p_teo})",
-                estado_destino="Rechazado",
+                subestado_rechazo="Rechazo: Pesaje",
             )
 
     # RL-05: Certificado de Calidad Faltante (PENDIENTE o AUSENTE)
@@ -107,7 +122,7 @@ def validar_insumo_lote(fila: Dict[str, Any], fecha_actual: str = "2026-10-18") 
         raise FilaLoteInvalidaError(
             "RL-05",
             f"Certificado de calidad en estado {certificado or 'AUSENTE'}",
-            estado_destino="Cuarentena",
+            subestado_rechazo="Rechazo: Cuarentena",
         )
 
     return fila
@@ -154,6 +169,8 @@ class GestorClientes:
 
     def crear_cliente(self, cliente: Cliente) -> None:
         """Registra un nuevo cliente verificando que su ID no esté duplicado."""
+        if not isinstance(cliente, Cliente):
+            raise TypeError("Se esperaba una instancia de Cliente.")
         if self.buscar_cliente(cliente.id_cliente) is not None:
             raise ValueError(f"Ya existe un cliente con el ID '{cliente.id_cliente}'.")
         self.clientes.append(cliente)
@@ -239,6 +256,8 @@ class GestorRutas:
 
     def crear_ruta(self, ruta: Ruta) -> None:
         """Registra una nueva ruta verificando que su ID no esté duplicado."""
+        if not isinstance(ruta, Ruta):
+            raise TypeError("Se esperaba una instancia de Ruta.")
         if self.buscar_ruta(ruta.id_ruta) is not None:
             raise ValueError(f"Ya existe una ruta con el ID '{ruta.id_ruta}'.")
         self.rutas.append(ruta)
@@ -277,7 +296,7 @@ class GestorRutas:
 
 
 class GestorPedidos:
-    """Gestiona las operaciones CRUD, máquina de estados y carga por lote de Pedidos."""
+    """Gestiona las operaciones CRUD, máquina de estados oficial y carga por lote de Pedidos."""
 
     CAMPOS_CSV: List[str] = [
         "id_pedido",
@@ -351,6 +370,8 @@ class GestorPedidos:
 
     def crear_pedido(self, pedido: Pedido) -> None:
         """Registra un nuevo pedido verificando unicidad de ID y existencia de llaves foráneas."""
+        if not isinstance(pedido, Pedido):
+            raise TypeError("Se esperaba una instancia de Pedido.")
         if self.buscar_pedido(pedido.id_pedido) is not None:
             raise ValueError(f"Ya existe un pedido con el ID '{pedido.id_pedido}'.")
         if self.gestor_clientes is not None and self.gestor_clientes.buscar_cliente(pedido.id_cliente) is None:
@@ -459,15 +480,13 @@ class GestorPedidos:
                         id_ruta=(fila.get("id_ruta") or "").strip(),
                     )
                 except FilaLoteInvalidaError as err:
-                    if err.estado_destino == "Cuarentena":
-                        reporte.cuarentena += 1
                     reporte.rechazadas.append(
                         RegistroRechazo(
                             linea=lector.line_num,
                             identificador=id_fila,
                             regla=err.regla,
                             motivo=err.motivo,
-                            estado_lote=err.estado_destino,
+                            subestado_rechazo=err.subestado_rechazo,
                         )
                     )
                     continue
@@ -478,7 +497,7 @@ class GestorPedidos:
                             identificador=id_fila,
                             regla="VALIDACION",
                             motivo=str(err),
-                            estado_lote="Rechazado",
+                            subestado_rechazo="Rechazo: Datos Inválidos",
                         )
                     )
                     continue
@@ -494,7 +513,7 @@ class GestorPedidos:
             with open(ruta_rechazos, mode="w", encoding="utf-8", newline="") as f_out:
                 escritor = csv.DictWriter(
                     f_out,
-                    fieldnames=["linea", "identificador", "regla", "motivo", "estado_lote"],
+                    fieldnames=["linea", "identificador", "regla", "motivo", "subestado_rechazo"],
                 )
                 escritor.writeheader()
                 for r in reporte.rechazadas:
@@ -504,7 +523,7 @@ class GestorPedidos:
                             "identificador": r.identificador,
                             "regla": r.regla,
                             "motivo": r.motivo,
-                            "estado_lote": r.estado_lote,
+                            "subestado_rechazo": r.subestado_rechazo,
                         }
                     )
 
