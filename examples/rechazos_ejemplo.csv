@@ -1,0 +1,9 @@
+linea,identificador,regla,reglas,motivo,subestado_rechazo
+4,PED-L03,RL-01,RL-01,Lote caducado (2026-11-01 <= 2026-11-01),Rechazo: Cuarentena
+5,PED-L04,RL-02,RL-02,Formato de código de lote inválido: LOT-ABC-123,Rechazo: Formato Inválido
+6,PED-L05,RL-03,RL-03,"Ruptura de cadena de frío: 10.5 °C fuera del umbral [2.0 °C, 8.0 °C]",Rechazo: Red de Frío
+7,PED-L06,RL-04,RL-04,"Diferencia de pesaje superior al 3% (real=104.5, teórico=100.0)",Rechazo: Pesaje
+8,PED-L07,RL-05,RL-05,Certificado de calidad en estado AUSENTE,Rechazo: Cuarentena
+9,PED-L08,RL-01,RL-01;RL-03;RL-05,"Lote caducado (2026-10-22 <= 2026-11-01); Ruptura de cadena de frío: 1.5 °C fuera del umbral [2.0 °C, 8.0 °C]; Certificado de calidad en estado PENDIENTE",Rechazo: Cuarentena
+10,PED-L09,RL-EST,RL-EST,"El estado inicial en lote debe ser 'Registrado', se recibió 'En Ruta'.",Rechazo: Estado Inválido
+11,PED-L10,RL-FK,RL-FK,Cliente inexistente: CLI-99,Rechazo: Datos Inválidos

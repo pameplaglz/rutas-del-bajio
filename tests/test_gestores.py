@@ -61,9 +61,11 @@ def test_c08_filtrado_correcto_por_id(gestor_pedidos: GestorPedidos) -> None:
 def test_c09_consulta_elementos_asociados_por_relacion(gestor_pedidos: GestorPedidos) -> None:
     """C-09: Consultar dependencias por cliente o por estado devuelve la lista filtrada correcta."""
     p1 = Pedido("PED-01", "CLI-01", "Prod A", 5, "León", "Irapuato", "2026-10-18", "Registrado", "RUT-01")
-    p2 = Pedido("PED-02", "CLI-01", "Prod B", 8, "León", "Irapuato", "2026-10-18", "En Ruta", "RUT-01")
+    p2 = Pedido("PED-02", "CLI-01", "Prod B", 8, "León", "Irapuato", "2026-10-18", "Registrado", "RUT-01")
     gestor_pedidos.crear_pedido(p1)
     gestor_pedidos.crear_pedido(p2)
+    for estado in ("En Validación", "Aprobado", "En Preparación", "En Ruta"):
+        gestor_pedidos.cambiar_estado_pedido("PED-02", estado)
 
     assert len(gestor_pedidos.listar_pedidos_por_cliente("CLI-01")) == 2
     assert len(gestor_pedidos.listar_pedidos_por_estado("En Ruta")) == 1

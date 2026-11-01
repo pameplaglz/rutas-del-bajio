@@ -1,16 +1,41 @@
 """Módulo de modelos de dominio para el sistema logístico Rutas del Bajío.
 
 Define las entidades principales (Cliente, Ruta, Pedido) junto con sus reglas
-de validación de atributos, máquina de estados unificada y métodos de serialización CSV.
+de validación de atributos, máquina de estados inviolable y serialización CSV.
+
+Criterios de limpieza vs. rechazo en modelos:
+- Se LIMPIA:
+  1. Espacios en blanco extremos (`strip()`) en cadenas de texto.
+  2. Normalización ortográfica de la ciudad `"Leon"` -> `"León"`.
+  3. Estado vacío (`""`) al construir o reconstruir un Pedido -> `"Registrado"`.
+- Se RECHAZA (lanza `ValueError` o `ErrorTransicionEstado`):
+  1. Campos obligatorios vacíos.
+  2. `Ruta.origen` distinto de `"León"`, o `Ruta.destino` fuera del catálogo del Bajío
+     (`Irapuato`, `Celaya`, `Salamanca`, `Guanajuato`).
+  3. `Pedido.origen` o `Pedido.destino` fuera del catálogo del Bajío, o `origen == destino`.
+  4. `distancia_km <= 0`, `tiempo_estimado <= 0`, o `cantidad <= 0` / no entera.
+  5. `fecha_pedido` que no cumpla el formato estricto `YYYY-MM-DD`.
+  6. `estado` fuera de los 7 estados oficiales (`ESTADOS_VALIDOS`), o creación directa de
+     un `Pedido` nuevo en un estado distinto de `"Registrado"` sin bandera de restauración.
 """
 
 from datetime import datetime
 from typing import Any, Dict, Set, Tuple
 
+from errores import ErrorTransicionEstado
 
-DESTINOS_PERMITIDOS: Set[str] = {"León", "Leon", "Irapuato", "Celaya", "Salamanca", "Guanajuato"}
 
-# Catálogo único y estricto de estados operativos oficiales del pedido
+CIUDADES_BAJIO: Tuple[str, ...] = (
+    "León",
+    "Irapuato",
+    "Celaya",
+    "Salamanca",
+    "Guanajuato",
+)
+
+DESTINOS_PERMITIDOS: Set[str] = set(CIUDADES_BAJIO)
+
+# Catálogo único y estricto de 7 estados operativos oficiales del pedido
 ESTADOS_VALIDOS: Tuple[str, ...] = (
     "Registrado",
     "En Validación",
@@ -32,27 +57,38 @@ TRANSICIONES_PERMITIDAS: Dict[str, Set[str]] = {
 }
 
 
-class ErrorTransicionEstado(ValueError):
-    """Excepción lanzada cuando se intenta realizar una transición de estado prohibida."""
+def normalizar_ciudad(nombre_ciudad: str) -> str:
+    """Limpia espacios extremos y normaliza 'Leon' a 'León' con tilde."""
+    limpia = str(nombre_ciudad).strip()
+    if limpia == "Leon":
+        return "León"
+    return limpia
 
 
 class Cliente:
     """Representa un cliente registrado en Rutas del Bajío."""
 
+    CAMPOS_VALIDOS: Tuple[str, ...] = ("id_cliente", "nombre", "ciudad", "telefono")
+
     def __init__(self, id_cliente: str, nombre: str, ciudad: str, telefono: str) -> None:
-        if not str(id_cliente).strip():
+        id_limpio = str(id_cliente).strip() if id_cliente is not None else ""
+        nombre_limpio = str(nombre).strip() if nombre is not None else ""
+        ciudad_limpia = normalizar_ciudad(ciudad) if ciudad is not None else ""
+        tel_limpio = str(telefono).strip() if telefono is not None else ""
+
+        if not id_limpio:
             raise ValueError("El id_cliente no puede estar vacío.")
-        if not str(nombre).strip():
+        if not nombre_limpio:
             raise ValueError("El nombre del cliente es obligatorio.")
-        if not str(ciudad).strip():
+        if not ciudad_limpia:
             raise ValueError("La ciudad del cliente es obligatoria.")
-        if not str(telefono).strip():
+        if not tel_limpio:
             raise ValueError("El teléfono del cliente es obligatorio.")
 
-        self.id_cliente: str = str(id_cliente).strip()
-        self.nombre: str = str(nombre).strip()
-        self.ciudad: str = str(ciudad).strip()
-        self.telefono: str = str(telefono).strip()
+        self.id_cliente: str = id_limpio
+        self.nombre: str = nombre_limpio
+        self.ciudad: str = ciudad_limpia
+        self.telefono: str = tel_limpio
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte la instancia de Cliente en un diccionario para persistencia CSV."""
@@ -65,11 +101,11 @@ class Cliente:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Cliente":
-        """Reconstruye una instancia de Cliente a partir de una fila leída con csv.DictReader."""
+        """Reconstruye una instancia de Cliente desde un diccionario con claves exactas en minúscula."""
         return cls(
             id_cliente=data["id_cliente"],
             nombre=data["nombre"],
-            ciudad=data.get("ciudad") or data.get("Ciudad", ""),
+            ciudad=data["ciudad"],
             telefono=data["telefono"],
         )
 
@@ -86,6 +122,15 @@ class Cliente:
 class Ruta:
     """Representa una ruta logística de transporte en la región del Bajío."""
 
+    CAMPOS_VALIDOS: Tuple[str, ...] = (
+        "id_ruta",
+        "origen",
+        "destino",
+        "distancia_km",
+        "tiempo_estimado",
+        "transportista",
+    )
+
     def __init__(
         self,
         id_ruta: str,
@@ -95,27 +140,42 @@ class Ruta:
         tiempo_estimado: float,
         transportista: str,
     ) -> None:
-        if not str(id_ruta).strip():
+        id_limpio = str(id_ruta).strip() if id_ruta is not None else ""
+        if not id_limpio:
             raise ValueError("El id_ruta no puede estar vacío.")
-        origen_limpio = str(origen).strip()
-        destino_limpio = str(destino).strip()
-        if origen_limpio not in {"León", "Leon"}:
+
+        origen_limpio = normalizar_ciudad(origen) if origen is not None else ""
+        destino_limpio = normalizar_ciudad(destino) if destino is not None else ""
+
+        if origen_limpio != "León":
             raise ValueError("El punto de origen debe ser León.")
-        if destino_limpio not in DESTINOS_PERMITIDOS or destino_limpio in {"León", "Leon"}:
-            raise ValueError(f"Destino inválido: {destino_limpio}. Debe pertenecer al catálogo del Bajío.")
-        if float(distancia_km) <= 0:
+        if destino_limpio not in DESTINOS_PERMITIDOS or destino_limpio == "León":
+            raise ValueError(
+                f"Destino inválido: {destino_limpio!r}. Debe pertenecer al catálogo del Bajío."
+            )
+
+        if isinstance(distancia_km, bool):
+            raise ValueError("La distancia en kilómetros debe ser numérica.")
+        dist_float = float(distancia_km)
+        if dist_float <= 0:
             raise ValueError("La distancia en kilómetros debe ser un número positivo.")
-        if float(tiempo_estimado) <= 0:
+
+        if isinstance(tiempo_estimado, bool):
+            raise ValueError("El tiempo estimado debe ser numérico.")
+        tiempo_float = float(tiempo_estimado)
+        if tiempo_float <= 0:
             raise ValueError("El tiempo estimado debe ser un número positivo.")
-        if not str(transportista).strip():
+
+        transp_limpio = str(transportista).strip() if transportista is not None else ""
+        if not transp_limpio:
             raise ValueError("El nombre del transportista es obligatorio.")
 
-        self.id_ruta: str = str(id_ruta).strip()
+        self.id_ruta: str = id_limpio
         self.origen: str = origen_limpio
         self.destino: str = destino_limpio
-        self.distancia_km: float = float(distancia_km)
-        self.tiempo_estimado: float = float(tiempo_estimado)
-        self.transportista: str = str(transportista).strip()
+        self.distancia_km: float = dist_float
+        self.tiempo_estimado: float = tiempo_float
+        self.transportista: str = transp_limpio
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte la instancia de Ruta en un diccionario para persistencia CSV."""
@@ -130,14 +190,14 @@ class Ruta:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Ruta":
-        """Reconstruye una instancia de Ruta a partir de una fila leída con csv.DictReader."""
+        """Reconstruye una instancia de Ruta desde un diccionario con claves exactas en minúscula."""
         return cls(
             id_ruta=data["id_ruta"],
             origen=data["origen"],
             destino=data["destino"],
             distancia_km=float(data["distancia_km"]),
             tiempo_estimado=float(data["tiempo_estimado"]),
-            transportista=data.get("transportista") or data.get("Transportista", ""),
+            transportista=data["transportista"],
         )
 
     def __str__(self) -> str:
@@ -155,7 +215,19 @@ class Ruta:
 
 
 class Pedido:
-    """Representa una orden de pedido logístico y controla su máquina de estados oficial."""
+    """Representa una orden de pedido logístico y controla su máquina de estados inviolable."""
+
+    CAMPOS_VALIDOS: Tuple[str, ...] = (
+        "id_pedido",
+        "id_cliente",
+        "producto",
+        "cantidad",
+        "origen",
+        "destino",
+        "fecha_pedido",
+        "estado",
+        "id_ruta",
+    )
 
     def __init__(
         self,
@@ -168,12 +240,18 @@ class Pedido:
         fecha_pedido: str,
         estado: str = "Registrado",
         id_ruta: str = "",
+        *,
+        _restaurar_estado: bool = False,
     ) -> None:
-        if not str(id_pedido).strip():
+        id_ped_limpio = str(id_pedido).strip() if id_pedido is not None else ""
+        id_cli_limpio = str(id_cliente).strip() if id_cliente is not None else ""
+        prod_limpio = str(producto).strip() if producto is not None else ""
+
+        if not id_ped_limpio:
             raise ValueError("El id_pedido no puede estar vacío.")
-        if not str(id_cliente).strip():
+        if not id_cli_limpio:
             raise ValueError("El id_cliente es obligatorio.")
-        if not str(producto).strip():
+        if not prod_limpio:
             raise ValueError("El producto es obligatorio.")
 
         if isinstance(cantidad, bool) or not isinstance(cantidad, int):
@@ -191,7 +269,20 @@ class Pedido:
         if cantidad_int <= 0:
             raise ValueError("La cantidad del pedido debe ser un entero positivo.")
 
-        fecha_limpia = str(fecha_pedido).strip()
+        origen_limpio = normalizar_ciudad(origen) if origen is not None else ""
+        destino_limpio = normalizar_ciudad(destino) if destino is not None else ""
+        if origen_limpio not in DESTINOS_PERMITIDOS:
+            raise ValueError(
+                f"Origen inválido: {origen_limpio!r}. Debe pertenecer al catálogo del Bajío."
+            )
+        if destino_limpio not in DESTINOS_PERMITIDOS:
+            raise ValueError(
+                f"Destino inválido: {destino_limpio!r}. Debe pertenecer al catálogo del Bajío."
+            )
+        if origen_limpio == destino_limpio:
+            raise ValueError("El origen y el destino del pedido no pueden ser la misma ciudad.")
+
+        fecha_limpia = str(fecha_pedido).strip() if fecha_pedido is not None else ""
         try:
             datetime.strptime(fecha_limpia, "%Y-%m-%d")
         except ValueError as exc:
@@ -202,20 +293,29 @@ class Pedido:
             raise ValueError(
                 f"Estado inválido: {estado_limpio!r}. Estados válidos: {ESTADOS_VALIDOS}."
             )
+        if not _restaurar_estado and estado_limpio != "Registrado":
+            raise ErrorTransicionEstado(
+                f"Un pedido nuevo solo puede crearse en estado 'Registrado', no en '{estado_limpio}'."
+            )
 
-        self.id_pedido: str = str(id_pedido).strip()
-        self.id_cliente: str = str(id_cliente).strip()
-        self.producto: str = str(producto).strip()
+        self.id_pedido: str = id_ped_limpio
+        self.id_cliente: str = id_cli_limpio
+        self.producto: str = prod_limpio
         self.cantidad: int = cantidad_int
-        self.origen: str = str(origen).strip()
-        self.destino: str = str(destino).strip()
+        self.origen: str = origen_limpio
+        self.destino: str = destino_limpio
         self.fecha_pedido: str = fecha_limpia
-        self.estado: str = estado_limpio
+        self._estado: str = estado_limpio
         self.id_ruta: str = str(id_ruta).strip() if id_ruta is not None else ""
+
+    @property
+    def estado(self) -> str:
+        """Devuelve el estado actual del pedido (propiedad de solo lectura)."""
+        return self._estado
 
     def puede_transicionar_a(self, nuevo_estado: str) -> bool:
         """Indica si la transición desde el estado actual hacia nuevo_estado es válida."""
-        return nuevo_estado in TRANSICIONES_PERMITIDAS.get(self.estado, set())
+        return nuevo_estado in TRANSICIONES_PERMITIDAS.get(self._estado, set())
 
     def transicionar_estado(self, nuevo_estado: str) -> None:
         """Ejecuta una transición en la máquina de estados validando las reglas del negocio."""
@@ -223,9 +323,9 @@ class Pedido:
             raise ValueError(f"El estado '{nuevo_estado}' no pertenece al catálogo oficial.")
         if not self.puede_transicionar_a(nuevo_estado):
             raise ErrorTransicionEstado(
-                f"Transición prohibida de '{self.estado}' a '{nuevo_estado}'."
+                f"Transición prohibida de '{self._estado}' a '{nuevo_estado}'."
             )
-        self.estado = nuevo_estado
+        self._estado = nuevo_estado
 
     def to_dict(self) -> Dict[str, Any]:
         """Convierte la instancia de Pedido en un diccionario para persistencia CSV."""
@@ -237,29 +337,36 @@ class Pedido:
             "origen": self.origen,
             "destino": self.destino,
             "fecha_pedido": self.fecha_pedido,
-            "estado": self.estado,
+            "estado": self._estado,
             "id_ruta": self.id_ruta,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Pedido":
-        """Reconstruye una instancia de Pedido a partir de una fila leída con csv.DictReader."""
+    def from_dict(cls, data: Dict[str, Any], *, restaurar_estado: bool = True) -> "Pedido":
+        """Reconstruye una instancia de Pedido desde un diccionario CSV con claves en minúscula.
+
+        Args:
+            data: Diccionario con los campos exactos del CSV de pedidos.
+            restaurar_estado: Si es True (por defecto al leer de persistencia), permite
+                restaurar cualquier estado válido del catálogo. Si es False, exige 'Registrado'.
+        """
         return cls(
             id_pedido=data["id_pedido"],
             id_cliente=data["id_cliente"],
-            producto=data.get("producto") or data.get("Producto", ""),
+            producto=data["producto"],
             cantidad=int(data["cantidad"]),
-            origen=data.get("origen") or data.get("Origen", ""),
-            destino=data.get("destino") or data.get("Destino", ""),
+            origen=data["origen"],
+            destino=data["destino"],
             fecha_pedido=data["fecha_pedido"],
             estado=data.get("estado") or "Registrado",
             id_ruta=data.get("id_ruta", ""),
+            _restaurar_estado=restaurar_estado,
         )
 
     def __str__(self) -> str:
         return (
             f"Pedido({self.id_pedido}: {self.producto} x{self.cantidad}, "
-            f"Cliente: {self.id_cliente}, Estado: {self.estado}, Ruta: {self.id_ruta or 'Sin asignar'})"
+            f"Cliente: {self.id_cliente}, Estado: {self._estado}, Ruta: {self.id_ruta or 'Sin asignar'})"
         )
 
     def __repr__(self) -> str:
@@ -267,5 +374,5 @@ class Pedido:
             f"Pedido(id_pedido={self.id_pedido!r}, id_cliente={self.id_cliente!r}, "
             f"producto={self.producto!r}, cantidad={self.cantidad!r}, origen={self.origen!r}, "
             f"destino={self.destino!r}, fecha_pedido={self.fecha_pedido!r}, "
-            f"estado={self.estado!r}, id_ruta={self.id_ruta!r})"
+            f"estado={self._estado!r}, id_ruta={self.id_ruta!r})"
         )

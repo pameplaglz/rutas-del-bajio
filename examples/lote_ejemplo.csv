@@ -1,0 +1,11 @@
+id_pedido,id_cliente,producto,cantidad,origen,destino,fecha_pedido,estado,id_ruta,codigo_lote,fecha_vencimiento,temperatura_c,peso_real,peso_teorico,certificado_calidad
+PED-L01,CLI-01,Suero Fisiológico,25,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10001-MX,2027-04-30,2.0,103.0,100.0,OK
+PED-L02,CLI-01,Insulina NPH,40,León,Celaya,2026-11-01,,RUT-02,lt-10002-mx,2027-04-30,8.0,97.0,100.0,ok
+PED-L03,CLI-01,Lácteo Pasteurizado,10,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10003-MX,2026-11-01,4.0,50.0,50.0,OK
+PED-L04,CLI-01,Reactivo Diagnóstico,15,León,Irapuato,2026-11-01,Registrado,RUT-01,LOT-ABC-123,2027-04-30,5.0,30.0,30.0,OK
+PED-L05,CLI-01,Vacuna Triple Viral,12,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10005-MX,2027-04-30,10.5,20.0,20.0,OK
+PED-L06,CLI-01,Grano Farmacéutico,40,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10006-MX,2027-04-30,5.0,104.5,100.0,OK
+PED-L07,CLI-01,Químico Industrial,30,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10007-MX,2027-04-30,5.0,80.0,80.0,
+PED-L08,CLI-01,Plasma Congelado,18,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10008-MX,2026-10-22,1.5,60.0,60.0,PENDIENTE
+PED-L09,CLI-01,Antibiótico,20,León,Irapuato,2026-11-01,En Ruta,RUT-01,LT-10009-MX,2027-04-30,4.5,50.0,50.0,OK
+PED-L10,CLI-99,Analgésico,10,León,Irapuato,2026-11-01,Registrado,RUT-01,LT-10010-MX,2027-04-30,4.5,50.0,50.0,OK

@@ -66,9 +66,11 @@ def test_etapa2_c02_bloqueo_transicion_invalida(gestor_pedidos: GestorPedidos) -
 def test_etapa2_c03_cancelacion_extemporanea_en_ruta(gestor_pedidos: GestorPedidos) -> None:
     """C-03 (Etapa 2): Intento de cancelar un pedido que ya está En Ruta es bloqueado."""
     pedido = Pedido(
-        "PED-E03", "CLI-01", "Vacunas", 100, "León", "Irapuato", "2026-10-18", "En Ruta", "RUT-01"
+        "PED-E03", "CLI-01", "Vacunas", 100, "León", "Irapuato", "2026-10-18", "Registrado", "RUT-01"
     )
     gestor_pedidos.crear_pedido(pedido)
+    for estado in ("En Validación", "Aprobado", "En Preparación", "En Ruta"):
+        gestor_pedidos.cambiar_estado_pedido("PED-E03", estado)
     with pytest.raises(ErrorTransicionEstado):
         gestor_pedidos.cambiar_estado_pedido("PED-E03", "Cancelado")
 
