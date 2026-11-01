@@ -1,8 +1,40 @@
-"""Pruebas unitarias para los modelos de dominio (Cliente, Ruta, Pedido)."""
+"""Pruebas unitarias para los modelos de dominio (Cliente, Ruta, Pedido) y estados oficiales."""
 
 import pytest
 
-from modelos import Cliente, ErrorTransicionEstado, Pedido, Ruta
+from modelos import (
+    ESTADOS_VALIDOS,
+    TRANSICIONES_PERMITIDAS,
+    Cliente,
+    ErrorTransicionEstado,
+    Pedido,
+    Ruta,
+)
+
+
+def test_catalogo_unico_estados_oficiales() -> None:
+    """Verifica que los únicos estados operativos válidos sean estrictamente los 7 oficiales."""
+    estados_esperados = (
+        "Registrado",
+        "En Validación",
+        "Aprobado",
+        "En Preparación",
+        "En Ruta",
+        "Entregado",
+        "Cancelado",
+    )
+    assert ESTADOS_VALIDOS == estados_esperados
+    assert set(TRANSICIONES_PERMITIDAS.keys()) == set(estados_esperados)
+
+
+@pytest.mark.parametrize(
+    "estado_obsoleto",
+    ["pendiente", "en_transito", "entregado", "cancelado", "Cuarentena", "Bloqueado", "Rechazado"],
+)
+def test_rechazo_estados_obsoletos_o_no_oficiales(estado_obsoleto: str) -> None:
+    """Verifica que estados obsoletos o subestados fuera del catálogo principal sean rechazados."""
+    with pytest.raises(ValueError):
+        Pedido("PED-01", "CLI-01", "Insumo", 10, "León", "Irapuato", "2026-10-18", estado_obsoleto)
 
 
 def test_c02_serializacion_correcta_a_diccionario(cliente_base: Cliente) -> None:
@@ -38,10 +70,10 @@ def test_c05_validacion_valores_fuera_del_catalogo_ruta(
 @pytest.mark.parametrize(
     "cantidad,fecha,estado",
     [
-        (0, "2026-10-18", "pendiente"),
-        (-5, "2026-10-18", "pendiente"),
-        ("12.5", "2026-10-18", "pendiente"),
-        (10, "18-10-2026", "pendiente"),
+        (0, "2026-10-18", "Registrado"),
+        (-5, "2026-10-18", "Registrado"),
+        ("12.5", "2026-10-18", "Registrado"),
+        (10, "18-10-2026", "Registrado"),
         (10, "2026-10-18", "estado_inexistente"),
     ],
 )
@@ -54,6 +86,7 @@ def test_c05_validacion_atributos_pedido(cantidad, fecha: str, estado: str) -> N
 def test_c10_formato_salida_legible_str(cliente_base: Cliente, ruta_base: Ruta) -> None:
     """C-10: Verifica que __str__ y __repr__ devuelvan representaciones legibles con datos clave."""
     pedido = Pedido("PED-01", "CLI-01", "Insumo Médico", 15, "León", "Irapuato", "2026-10-18")
+    assert pedido.estado == "Registrado"
     assert "CLI-01" in str(cliente_base) and "Distribuidora Bajío" in str(cliente_base)
     assert "RUT-01" in str(ruta_base) and "Irapuato" in str(ruta_base)
     assert "PED-01" in str(pedido) and "Insumo Médico" in str(pedido)

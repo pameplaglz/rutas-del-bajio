@@ -28,7 +28,7 @@ def test_c04_llave_foranea_inexistente_descarta_fila_y_registra(
     archivo_pedidos = tmp_path / "pedidos_corruptos.csv"
     archivo_pedidos.write_text(
         "id_pedido,id_cliente,producto,cantidad,origen,destino,fecha_pedido,estado,id_ruta\n"
-        "PED-99,CLI-NO-EXISTE,Cajas,10,León,Irapuato,2026-10-18,pendiente,RUT-01\n",
+        "PED-99,CLI-NO-EXISTE,Cajas,10,León,Irapuato,2026-10-18,Registrado,RUT-01\n",
         encoding="utf-8",
     )
     gestor = GestorPedidos(str(archivo_pedidos), gestor_clientes, gestor_rutas)
@@ -51,7 +51,7 @@ def test_c07_persistencia_de_la_eliminacion(tmp_path, gestor_clientes: GestorCli
 
 def test_c08_filtrado_correcto_por_id(gestor_pedidos: GestorPedidos) -> None:
     """C-08: Buscar un ID existente retorna el objeto exacto asociado."""
-    pedido = Pedido("PED-10", "CLI-01", "Componentes", 20, "León", "Irapuato", "2026-10-18", "pendiente", "RUT-01")
+    pedido = Pedido("PED-10", "CLI-01", "Componentes", 20, "León", "Irapuato", "2026-10-18", "Registrado", "RUT-01")
     gestor_pedidos.crear_pedido(pedido)
     encontrado = gestor_pedidos.buscar_pedido("PED-10")
     assert encontrado is not None
@@ -60,13 +60,13 @@ def test_c08_filtrado_correcto_por_id(gestor_pedidos: GestorPedidos) -> None:
 
 def test_c09_consulta_elementos_asociados_por_relacion(gestor_pedidos: GestorPedidos) -> None:
     """C-09: Consultar dependencias por cliente o por estado devuelve la lista filtrada correcta."""
-    p1 = Pedido("PED-01", "CLI-01", "Prod A", 5, "León", "Irapuato", "2026-10-18", "pendiente", "RUT-01")
-    p2 = Pedido("PED-02", "CLI-01", "Prod B", 8, "León", "Irapuato", "2026-10-18", "en_transito", "RUT-01")
+    p1 = Pedido("PED-01", "CLI-01", "Prod A", 5, "León", "Irapuato", "2026-10-18", "Registrado", "RUT-01")
+    p2 = Pedido("PED-02", "CLI-01", "Prod B", 8, "León", "Irapuato", "2026-10-18", "En Ruta", "RUT-01")
     gestor_pedidos.crear_pedido(p1)
     gestor_pedidos.crear_pedido(p2)
 
     assert len(gestor_pedidos.listar_pedidos_por_cliente("CLI-01")) == 2
-    assert len(gestor_pedidos.listar_pedidos_por_estado("en_transito")) == 1
+    assert len(gestor_pedidos.listar_pedidos_por_estado("En Ruta")) == 1
 
 
 def test_c11_manejo_archivo_csv_solo_con_cabeceras(tmp_path) -> None:
@@ -79,7 +79,7 @@ def test_c11_manejo_archivo_csv_solo_con_cabeceras(tmp_path) -> None:
 
 @pytest.mark.integracion
 def test_c12_flujo_integral_dependencias(tmp_path) -> None:
-    """C-12: Alta, guardado, actualización, recarga desde disco y consulta cruzada consistente."""
+    """C-12: Alta, guardado, transición de estados oficiales, recarga desde disco y consulta cruzada."""
     g_cli = GestorClientes(str(tmp_path / "clientes.csv"))
     g_rut = GestorRutas(str(tmp_path / "rutas.csv"))
     g_cli.crear_cliente(Cliente("CLI-100", "AgroBajío", "Celaya", "4619998877"))
@@ -87,12 +87,15 @@ def test_c12_flujo_integral_dependencias(tmp_path) -> None:
 
     g_ped = GestorPedidos(str(tmp_path / "pedidos.csv"), g_cli, g_rut)
     g_ped.crear_pedido(
-        Pedido("PED-100", "CLI-100", "Fertilizante", 40, "León", "Celaya", "2026-10-18", "pendiente", "RUT-100")
+        Pedido("PED-100", "CLI-100", "Fertilizante", 40, "León", "Celaya", "2026-10-18", "Registrado", "RUT-100")
     )
-    g_ped.cambiar_estado_pedido("PED-100", "en_transito")
+    g_ped.cambiar_estado_pedido("PED-100", "En Validación")
+    g_ped.cambiar_estado_pedido("PED-100", "Aprobado")
+    g_ped.cambiar_estado_pedido("PED-100", "En Preparación")
+    g_ped.cambiar_estado_pedido("PED-100", "En Ruta")
 
     g_ped_recargado = GestorPedidos(str(tmp_path / "pedidos.csv"), g_cli, g_rut)
     ped = g_ped_recargado.buscar_pedido("PED-100")
     assert ped is not None
-    assert ped.estado == "en_transito"
+    assert ped.estado == "En Ruta"
     assert ped.id_cliente == "CLI-100"
