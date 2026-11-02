@@ -163,7 +163,7 @@ def validar_insumo_lote(
     violaciones: List[Tuple[str, str, str]] = []
 
     # 1. RL-01: Caducidad Vencida (Fecha_Vencimiento <= Fecha_Actual)
-    if fecha_vencimiento:
+    if fecha_vencimiento != "" and fecha_vencimiento is not None:
         try:
             dt_venc = datetime.strptime(fecha_vencimiento, "%Y-%m-%d")
             if dt_venc <= dt_actual:
@@ -252,7 +252,7 @@ def validar_insumo_lote(
             )
 
     # 5. RL-05: Certificado de Calidad Faltante (ausente, vacío, PENDIENTE o AUSENTE)
-    if certificado in {"PENDIENTE", "AUSENTE"} or certificado != "OK":
+    if certificado == "PENDIENTE" or certificado == "AUSENTE":
         violaciones.append(
             (
                 "RL-05",

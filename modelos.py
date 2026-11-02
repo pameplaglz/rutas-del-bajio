@@ -254,7 +254,9 @@ class Pedido:
         if not prod_limpio:
             raise ValueError("El producto es obligatorio.")
 
-        if isinstance(cantidad, bool) or not isinstance(cantidad, int):
+        if isinstance(cantidad, bool):
+            raise ValueError("El campo cantidad de un pedido debe ser únicamente entero.")
+        if not isinstance(cantidad, int):
             try:
                 if isinstance(cantidad, str) and "." in cantidad:
                     raise ValueError("La cantidad debe ser estrictamente entera.")
